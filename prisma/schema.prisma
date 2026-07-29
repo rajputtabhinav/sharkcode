@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id // Clerk ID
+  email             String   @unique
+  name              String?
+  role              String   @default("USER") // "USER" | "ADMIN"
+  isPro             Boolean  @default(false)
+  referralCode      String   @unique
+  referredByCode    String?
+  balancePaise      Int      @default(0)
+  totalEarnedPaise  Int      @default(0)
+  totalReferrals    Int      @default(0)
+  totalProReferrals Int      @default(0)
+  version           Int      @default(0) // For optimistic locking
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  referralEvents ReferralEvent[] @relation("Referrer")
+  payments       Payment[]
+  withdrawals    Withdrawal[]
+  conversations  Conversation[]
+
+  @@index([referredByCode])
+  @@index([isPro])
+  @@index([createdAt])
+  @@index([role])
+}
+
+model ReferralEvent {
+  id             String   @id @default(cuid())
+  referrerId     String
+  referredUserId String
+  type           String   // "SIGNUP" | "PRO_PURCHASE"
+  amountPaise    Int
+  createdAt      DateTime @default(now())
+
+  referrer User @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+  @@index([createdAt])
+  @@index([referrerId, type])
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  userId      String
+  amountPaise Int
+  upiRef      String?   @unique // Prevent duplicate submissions
+  status      String    @default("PENDING") // "PENDING" | "CONFIRMED" | "REJECTED"
+  createdAt   DateTime  @default(now())
+  confirmedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId, status])
+}
+
+model Withdrawal {
+  id          String    @id @default(cuid())
+  userId      String
+  upiId       String
+  amountPaise Int
+  status      String    @default("PENDING") // "PENDING" | "APPROVED" | "PAID" | "REJECTED"
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId, status])
+}
+
+// Audit logging for admin actions
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String
+  action     String // "APPROVE_PAYMENT", "REJECT_PAYMENT", "APPROVE_WITHDRAWAL", etc.
+  targetId   String // ID of the affected record
+  targetType String // "Payment", "Withdrawal", "User"
+  metadata   String? // JSON string for additional context
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@index([targetType, targetId])
+}
+
+// Idempotency for webhook replay protection
+model IdempotencyKey {
+  id        String   @id
+  response  String? // JSON string
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// AI Chat conversations
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String    @default("New Chat")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId, updatedAt])
+  @@index([userId, createdAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String // "user" | "assistant" | "system"
+  content        String
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
